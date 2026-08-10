@@ -65,14 +65,16 @@ class GenerationTab:
                 prompt_input = gr.Textbox(
                     label="生成提示词",
                     placeholder="例如：一位年轻女性的肖像，自然光照",
-                    lines=3
+                    lines=3,
+                    info="描述你想生成的画面，越具体效果越好（支持中文）。可包含主体、环境、光线、风格等",
                 )
 
             with gr.Row():
                 negative_prompt_input = gr.Textbox(
                     label="负面提示词",
                     placeholder="可选，描述不想要的内容",
-                    lines=2
+                    lines=2,
+                    info="告诉模型不要出现的内容，如：低质量、模糊、畸形、多余手指等，可有效提升成片质量",
                 )
 
             # Reference image (img2img)
@@ -87,22 +89,26 @@ class GenerationTab:
                 strength_input = gr.Slider(
                     minimum=0.1, maximum=1.0, value=0.75, step=0.05,
                     label="参考强度",
-                    info="0.1≈几乎保留原图，1.0≈完全重绘"
+                    info="保留参考图的程度：0.1≈几乎完全保留原图，1.0≈完全重绘。想改构图用 0.7-0.9，想微调细节用 0.3-0.5",
                 )
 
             # Parameter row (values/ranges adapt per model)
             with gr.Row():
                 num_images = gr.Slider(
-                    minimum=1, maximum=10, value=4, step=1, label="生成数量"
+                    minimum=1, maximum=10, value=4, step=1, label="生成数量",
+                    info="一次生成的图片张数，越多耗时越长（每张都是独立结果，可挑选满意的）",
                 )
                 guidance_scale = gr.Slider(
-                    minimum=1.0, maximum=20.0, value=7.5, step=0.5, label="引导系数"
+                    minimum=1.0, maximum=20.0, value=7.5, step=0.5, label="引导系数",
+                    info="提示词对画面的控制力度：越高越贴合提示词，但过高会色彩过曝、画面失真；推荐 5-8",
                 )
                 num_inference_steps = gr.Slider(
-                    minimum=5, maximum=100, value=30, step=5, label="推理步数"
+                    minimum=5, maximum=100, value=30, step=5, label="推理步数",
+                    info="去噪迭代次数：越多细节越精细，但生成越慢；25-30 步已足够，超过 40 步提升很小",
                 )
                 size_dropdown = gr.Dropdown(
-                    choices=["512x512"], value="512x512", label="分辨率"
+                    choices=["512x512"], value="512x512", label="分辨率",
+                    info="输出图片尺寸：越大细节越丰富，但更慢、更吃显存；换模型后会自动适配推荐值",
                 )
 
             with gr.Row():
