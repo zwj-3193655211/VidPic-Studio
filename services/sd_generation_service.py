@@ -16,11 +16,15 @@ try:
     from diffusers import (
         StableDiffusionPipeline,
         StableDiffusionXLPipeline,
+        StableDiffusionImg2ImgPipeline,
+        StableDiffusionXLImg2ImgPipeline,
         DPMSolverMultistepScheduler,
     )
 except ImportError:
     StableDiffusionPipeline = None
     StableDiffusionXLPipeline = None
+    StableDiffusionImg2ImgPipeline = None
+    StableDiffusionXLImg2ImgPipeline = None
     DPMSolverMultistepScheduler = None
 
 logger = logging.getLogger(__name__)
@@ -76,6 +80,7 @@ class SDGenerationService:
 
         # Pipeline (loaded lazily)
         self.pipeline = None
+        self._img2img_pipeline = None
         self.model_loaded = False
 
         logger.info(f"Initialized SDGenerationService with model: {model_name} (type={model_type})")
@@ -127,6 +132,7 @@ class SDGenerationService:
 
             if not getattr(self, "model_offloaded", False):
                 self.pipeline = self.pipeline.to(self.device)
+            self._img2img_pipeline = None  # stale wrapper must be rebuilt
             self.model_loaded = True
             logger.info("Model loaded successfully")
         except Exception as e:
@@ -140,13 +146,16 @@ class SDGenerationService:
                 self.pipeline.enable_vae_tiling()
             except Exception:
                 pass
-            # VAE must stay in float32 to avoid the "modules should be kept in
-            # float32" warning and eliminate possible colour-banding artefacts.
-            # The VAE is only ~167 MB so this has negligible VRAM impact.
-            try:
-                self.pipeline.vae.to(dtype=torch.float32)
-            except Exception:
-                pass
+            # IMPORTANT: keep the VAE in fp16 together with the UNet. The
+            # pipeline's built-in `force_upcast` logic then upcasts the VAE to
+            # float32 during decode AND casts the latents to the same dtype
+            # (pipeline_stable_diffusion_xl.py: needs_upcasting branch).
+            # Manually forcing `vae.to(float32)` while the UNet stays fp16
+            # crashes on CUDA with
+            #   RuntimeError: Input type (struct c10::Half) and bias type
+            #   (float) should be the same
+            # because diffusers only auto-casts the latents when the VAE
+            # itself is fp16.
             if self.enable_attention_slicing:
                 try:
                     self.pipeline.enable_model_cpu_offload()
@@ -210,6 +219,7 @@ class SDGenerationService:
         if self.pipeline is not None:
             del self.pipeline
             self.pipeline = None
+            self._img2img_pipeline = None
             self.model_loaded = False
 
             if self.device == "cuda":
@@ -220,6 +230,36 @@ class SDGenerationService:
     # ------------------------------------------------------------------ #
     # Generation
     # ------------------------------------------------------------------ #
+    def _get_img2img_pipeline(self):
+        """Lazily build the img2img pipeline from the loaded txt2img pipeline.
+
+        Uses `from_pipe` so the two pipelines SHARE the same model components
+        (no extra VRAM, no reload). The cached wrapper is invalidated whenever
+        the main pipeline is (re)loaded or unloaded.
+        """
+        if self._img2img_pipeline is not None:
+            return self._img2img_pipeline
+
+        if isinstance(self.pipeline, StableDiffusionXLPipeline):
+            img2img_cls = StableDiffusionXLImg2ImgPipeline
+        else:
+            img2img_cls = StableDiffusionImg2ImgPipeline
+
+        if img2img_cls is None:
+            raise ImportError("diffusers img2img pipelines are not available")
+
+        self._img2img_pipeline = img2img_cls.from_pipe(self.pipeline)
+        logger.info("img2img pipeline wrapper created (shared components, no reload)")
+        return self._img2img_pipeline
+
+    def _prepare_init_image(self, init_image: Image.Image, width: int, height: int) -> Image.Image:
+        """Resize the reference image to the generation size (RGB, no alpha)."""
+        if init_image.mode != "RGB":
+            init_image = init_image.convert("RGB")
+        if init_image.size != (width, height):
+            init_image = init_image.resize((width, height), Image.LANCZOS)
+        return init_image
+
     def generate_single(
         self,
         prompt: str,
@@ -230,30 +270,51 @@ class SDGenerationService:
         height: int = None,
         seed: int = None,
         output_dir: str = None,
-        save_image: bool = True
+        save_image: bool = True,
+        init_image: Image.Image = None,
+        strength: float = 0.75
     ) -> Image.Image:
-        """Generate a single image"""
+        """Generate a single image.
+
+        If `init_image` is provided, runs img2img with the given denoising
+        `strength` (0.0 = keep reference as-is, 1.0 = fully redraw).
+        """
         if not self.model_loaded:
             self.load_model()
 
         width = width or self.width
         height = height or self.height
-        logger.info(f"Generating image with prompt: {prompt} ({width}x{height}, {num_inference_steps} steps)")
+        logger.info(
+            f"Generating image with prompt: {prompt} ({width}x{height}, "
+            f"{num_inference_steps} steps, img2img={init_image is not None})"
+        )
 
         generator = None
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
         with torch.inference_mode():
-            result = self.pipeline(
-                prompt=prompt,
-                negative_prompt=negative_prompt or None,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                width=width,
-                height=height,
-                generator=generator
-            )
+            if init_image is not None:
+                pipe = self._get_img2img_pipeline()
+                result = pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt or None,
+                    image=self._prepare_init_image(init_image, width, height),
+                    strength=float(strength),
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                )
+            else:
+                result = self.pipeline(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt or None,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    width=width,
+                    height=height,
+                    generator=generator,
+                )
         image = result.images[0]
 
         if save_image and output_dir:
@@ -273,7 +334,9 @@ class SDGenerationService:
         guidance_scale: float = 7.5,
         width: int = None,
         height: int = None,
-        output_dir: str = None
+        output_dir: str = None,
+        init_image: Image.Image = None,
+        strength: float = 0.75
     ) -> Tuple[List[Image.Image], Dict[str, Any]]:
         """Generate a batch of images with the same prompt"""
         logger.info(f"Generating batch of {num_images} images")
@@ -298,7 +361,9 @@ class SDGenerationService:
                 width=width,
                 height=height,
                 output_dir=str(batch_dir) if batch_dir else None,
-                save_image=(batch_dir is not None)
+                save_image=(batch_dir is not None),
+                init_image=init_image,
+                strength=strength,
             )
             images.append(image)
 
@@ -313,6 +378,8 @@ class SDGenerationService:
             "height": height,
             "device": self.device,
             "model_name": self.model_name,
+            "img2img": init_image is not None,
+            "strength": strength if init_image is not None else None,
             "timestamp": datetime.now().isoformat()
         }
 

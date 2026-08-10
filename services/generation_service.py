@@ -104,7 +104,9 @@ class GenerationService:
         num_inference_steps: int = 30,
         width: int = None,
         height: int = None,
-        output_dir: str = "output"
+        output_dir: str = "output",
+        init_image: Image.Image = None,
+        strength: float = 0.75
     ) -> Tuple[List[Image.Image], Dict[str, Any]]:
         """Generate a batch of images"""
         if self.use_sd and self.sd_service:
@@ -116,7 +118,9 @@ class GenerationService:
                 guidance_scale=guidance_scale,
                 width=width,
                 height=height,
-                output_dir=output_dir
+                output_dir=output_dir,
+                init_image=init_image,
+                strength=strength,
             )
         return self._generate_placeholder_batch(
             prompt=prompt,

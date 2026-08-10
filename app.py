@@ -24,6 +24,33 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class _ServerNoiseFilter(logging.Filter):
+    """Suppress known-harmless uvicorn/asyncio noise on Windows:
+
+    - "Invalid HTTP request received": uvicorn warning when a client (browser
+      extension, port scanner, aborted page load) sends a malformed request.
+    - "Exception in callback ... ConnectionResetError [WinError 10054]":
+      asyncio Proactor callback noise when a client drops the connection
+      (known benign behaviour on Windows).
+
+    Neither affects generation; they only pollute the console log.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "Invalid HTTP request received" in msg:
+            return False
+        if "Exception in callback" in msg and (
+            "ConnectionResetError" in msg or "WinError 10054" in msg
+        ):
+            return False
+        return True
+
+
+for _noise_logger_name in ("uvicorn.error", "uvicorn.access", "asyncio"):
+    logging.getLogger(_noise_logger_name).addFilter(_ServerNoiseFilter())
+
+
 class FaceGeneratorApp:
     """Main application for image generation"""
 

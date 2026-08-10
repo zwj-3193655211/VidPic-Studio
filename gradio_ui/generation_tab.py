@@ -75,6 +75,20 @@ class GenerationTab:
                     lines=2
                 )
 
+            # Reference image (img2img)
+            with gr.Row():
+                ref_image_input = gr.Image(
+                    label="参考图（图生图，可选）",
+                    type="pil",
+                    sources=["upload", "clipboard"],
+                    info="上传图片后按参考图构图/风格生成；留空则为纯文生图",
+                )
+                strength_input = gr.Slider(
+                    minimum=0.1, maximum=1.0, value=0.75, step=0.05,
+                    label="参考强度",
+                    info="0.1≈几乎保留原图，1.0≈完全重绘"
+                )
+
             # Parameter row (values/ranges adapt per model)
             with gr.Row():
                 num_images = gr.Slider(
@@ -140,6 +154,8 @@ class GenerationTab:
                     num_inference_steps,
                     size_dropdown,
                     output_dir_input,
+                    ref_image_input,
+                    strength_input,
                 ],
                 outputs=[gallery_output, status_output]
             )
@@ -191,7 +207,9 @@ class GenerationTab:
         guidance_scale: float,
         num_inference_steps: int,
         size_label: str,
-        output_dir: str
+        output_dir: str,
+        ref_image=None,
+        strength: float = 0.75
     ) -> Tuple[List[Tuple[str, str]], str]:
         """Generate images with the selected model and parameters"""
         try:
@@ -213,6 +231,7 @@ class GenerationTab:
             logger.info(
                 f"Generating {num_images} images | model={model_key} | "
                 f"{width}x{height} | steps={num_inference_steps} | guidance={guidance_scale}"
+                f" | img2img={ref_image is not None}"
             )
             images, metadata = self.generation_service.generate_batch(
                 prompt=prompt,
@@ -222,18 +241,23 @@ class GenerationTab:
                 num_inference_steps=num_inference_steps,
                 width=width,
                 height=height,
-                output_dir=output_dir
+                output_dir=output_dir,
+                init_image=ref_image,
+                strength=strength,
             )
 
             if not images:
                 return [], "生成失败：未能生成任何图片"
 
             gallery_images = [(img, f"Image {i+1}") for i, img in enumerate(images)]
+            mode = "图生图" if ref_image is not None else "文生图"
             status = (
                 f"成功生成 {len(images)} 张图片"
                 f"（模型: {self.generation_service.get_current_model_name()}，"
-                f"{width}x{height}，{num_inference_steps} 步）"
+                f"{mode}，{width}x{height}，{num_inference_steps} 步）"
             )
+            if ref_image is not None:
+                status += f"，参考强度 {strength}"
             batch_dir = metadata.get("batch_id", "")
             if batch_dir:
                 status += f"，保存至 {output_dir}/{batch_dir}"
