@@ -56,6 +56,13 @@ class LTXVideoService:
                 "snapshot_download('Lightricks/LTX-Video', local_dir=models/ltx_video)"
             )
 
+        # transformers 4.57+ uses lazy module loading – diffusers can't
+        # resolve T5Tokenizer from the lazy placeholder, so force-load the
+        # real class and swap it into the 'transformers' namespace.
+        import transformers
+        from transformers.models.t5.tokenization_t5 import T5Tokenizer as _RealT5Tokenizer
+        setattr(transformers, "T5Tokenizer", _RealT5Tokenizer)
+
         logger.info(f"Loading LTX-Video model from {self.model_dir} ...")
         self.pipeline = LTXPipeline.from_pretrained(
             self.model_dir,
