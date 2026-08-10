@@ -97,6 +97,10 @@ class LTXVideoService:
         if self._i2v_pipeline is not None:
             return self._i2v_pipeline
         self._i2v_pipeline = LTXImageToVideoPipeline.from_pipe(self.pipeline)
+        # Re-register cpu offload hooks on the new I2V wrapper (from_pipe
+        # shares component instances but does not re-attach offload hooks).
+        if hasattr(self.pipeline, "_all_hooks") and self.pipeline._all_hooks:
+            self._i2v_pipeline.enable_model_cpu_offload()
         logger.info("LTXImageToVideoPipeline wrapper created (shared components)")
         return self._i2v_pipeline
 
