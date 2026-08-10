@@ -9,11 +9,24 @@ cd ~/Documents/face-generator
 # 2. 运行测试（验证环境）
 python -m pytest tests/ -v
 
-# 3. 启动应用
-python app.py
+# 3. 启动应用（双击 run.bat 也行）
+python app.py --model-path "C:/Users/31936/.cache/modelscope/models/AI-ModelScope--stable-diffusion-v1-5/snapshots/master"
 ```
 
 **浏览器访问**: http://127.0.0.1:7860
+
+> **一键启动**: 双击 `run.bat` 会自动检测本地模型（魔搭缓存目录存在即用本地模型，无需联网）并启动。
+
+## ⚡ 当前环境配置（2026-08-10）
+
+| 项 | 状态 |
+|---|---|
+| torch | **2.11.0+cu128**（CUDA 版，全局环境） |
+| GPU | RTX 5060 Laptop 8GB，生成一张 512x512 约 **4 秒**（20 步） |
+| SD 模型 | 魔搭本地缓存 `~/.cache/modelscope/models/AI-ModelScope--stable-diffusion-v1-5/snapshots/master`（4GB，**无需联网**） |
+| HuggingFace | 直连被墙，代理（127.0.0.1:33210）对 HF 不稳定；如需在线下载模型，优先走代理或 hf-mirror |
+
+**模型说明**：runwayml/stable-diffusion-v1-5（diffusers 格式，safetensors 权重）。本地模型来自魔搭 AI-ModelScope 镜像，与 HF 原版等价。
 
 ---
 

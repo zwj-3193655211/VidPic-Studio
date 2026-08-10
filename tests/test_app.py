@@ -33,7 +33,6 @@ class TestFaceGeneratorApp:
         assert app.output_dir == tmp_output_dir
         assert app.share is False
         assert app.generation_service is not None
-        assert app.scoring_service is not None
         assert tmp_output_dir.exists()
 
     def test_app_builds_interface(self, tmp_output_dir):

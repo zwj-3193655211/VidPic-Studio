@@ -1,36 +1,85 @@
 @echo off
-REM Launch script for Face Generator Application (Windows)
+REM ================================================
+REM   AI Í¼Æ¬Éú³ÉÆ÷ - Ò»¼üÆô¶¯½Å±¾ (Windows)
+REM   ÐÞ¸´: GBK±àÂë / ÍêÕûÒÀÀµ¼ì²é / Ä£ÐÍÏÂÀ­ / venvÓÅÏÈ
+REM   ×¢Òâ: if ¿éÄÚ echo ²»ÄÜÓÃÓ¢ÎÄÀ¨ºÅ£¬·ñÔò cmd Óï·¨´íÎó
+REM ================================================
+
+setlocal
+cd /d "%~dp0"
 
 echo ================================================
-echo   å¤šè§’åº¦äººè„¸ç”Ÿæˆå™¨ - å¯åŠ¨è„šæœ¬
+echo   AI Í¼Æ¬Éú³ÉÆ÷ v0.3.0 - Ò»¼üÆô¶¯
 echo ================================================
 echo.
 
-REM Check if Python is installed
-python --version >nul 2>&1
+REM ---- Ñ¡Ôñ Python£ºÏîÄ¿ venv ÓÅÏÈ£¨transformers 4.x + CUDA torch£©£¬
+REM      Æä´Î Anaconda£¨È«¾Ö CUDA torch£©£¬×îºó PATH ÖÐµÄ python ----
+set "PYTHON=python"
+if exist ".venv\Scripts\python.exe" (
+    set "PYTHON=.venv\Scripts\python.exe"
+    echo [Python: .venv£¬ÏîÄ¿ÐéÄâ»·¾³]
+) else (
+    if exist "D:\tools\Anaconda3\python.exe" (
+        set "PYTHON=D:\tools\Anaconda3\python.exe"
+        echo [Python: Anaconda£¬È«¾Ö»·¾³]
+    ) else (
+        echo [Python: PATH ÖÐµÄ python]
+    )
+)
+
+REM ---- ±¾µØÄ£ÐÍ¼ì²â£¨Ä§´îÏÂÔØµÄ SD1.5£¬ÓÐÔòÃâÁªÍø£©----
+set "LOCAL_MODEL=%USERPROFILE%\.cache\modelscope\models\AI-ModelScope--stable-diffusion-v1-5\snapshots\master"
+set "MODEL_ARGS="
+if exist "%LOCAL_MODEL%\model_index.json" (
+    set "MODEL_ARGS=--model-path %LOCAL_MODEL%"
+    echo [Ä£ÐÍ£º±¾µØÄ§´î SD1.5£¬ÎÞÐèÁªÍø]
+) else (
+    echo [Ä£ÐÍ£ºÔÚÏß HuggingFace SD1.5£¬Ê×´ÎÉú³ÉÐèÏÂÔØÔ¼ 4GB]
+)
+
+REM ---- HuggingFace ÍøÂç¼ÓËÙ£¨½öÔÚÏßÏÂÔØÊ±ÐèÒª£©----
+set "HTTP_PROXY=http://127.0.0.1:33210"
+set "HTTPS_PROXY=http://127.0.0.1:33210"
+set "NO_PROXY=127.0.0.1,localhost"
+
+REM ---- ¼ì²é Python ÊÇ·ñ¿ÉÓÃ ----
+"%PYTHON%" --version >nul 2>&1
 if errorlevel 1 (
-    echo é”™è¯¯ï¼šæœªæ‰¾åˆ°Pythonï¼Œè¯·å…ˆå®‰è£…Python 3.10+
+    echo ´íÎó£ºÎ´ÕÒµ½ Python£¬ÇëÏÈ°²×° Python 3.10+
     pause
     exit /b 1
 )
 
-REM Check if dependencies are installed
-python -c "import gradio" >nul 2>&1
+REM ---- ¼ì²éºËÐÄÒÀÀµ£¨gradio/torch/diffusers/transformers/PIL£©----
+"%PYTHON%" -c "import gradio, torch, diffusers, transformers, PIL" >nul 2>&1
 if errorlevel 1 (
-    echo ä¾èµ–æœªå®‰è£…ï¼Œæ­£åœ¨å®‰è£…...
-    pip install -r requirements.txt
+    echo ºËÐÄÒÀÀµÈ±Ê§£¬ÕýÔÚ°²×°£¨¿ÉÄÜÐèÒª¼¸·ÖÖÓ£©...
+    "%PYTHON%" -m pip install -r requirements.txt
     if errorlevel 1 (
-        echo é”™è¯¯ï¼šä¾èµ–å®‰è£…å¤±è´¥
+        echo ´íÎó£ºÒÀÀµ°²×°Ê§°Ü£¬Çë¼ì²éÍøÂçºóÖØÊÔ
+        pause
+        exit /b 1
+    )
+    "%PYTHON%" -c "import gradio, torch, diffusers, transformers, PIL" >nul 2>&1
+    if errorlevel 1 (
+        echo ´íÎó£ºÒÀÀµ°²×°ºóÈÔÎÞ·¨µ¼Èë£¬ÇëÊÖ¶¯ÔËÐÐ pip ÅÅ²é
         pause
         exit /b 1
     )
 )
 
-REM Launch the application
-echo.
-echo æ­£åœ¨å¯åŠ¨åº”ç”¨...
-echo åº”ç”¨å°†åœ¨æµè§ˆå™¨ä¸­æ‰“å¼€: http://127.0.0.1:7860
-echo.
-python app.py
+REM ---- ÏÔÊ¾ GPU ×´Ì¬£¨½öÌáÊ¾£¬²»×è¶Ï£©----
+"%PYTHON%" -c "import torch; print('[GPU]', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda, CPU mode')" 2>nul
 
+echo.
+echo ÕýÔÚÆô¶¯Ó¦ÓÃ...
+echo ä¯ÀÀÆ÷½«´ò¿ª: http://127.0.0.1:7860
+echo ¹Ø±Õ±¾´°¿Ú»ò°´ Ctrl+C ¿ÉÍ£Ö¹Ó¦ÓÃ
+echo.
+
+"%PYTHON%" app.py %MODEL_ARGS%
+
+echo.
+echo Ó¦ÓÃÒÑÍË³ö¡£
 pause

@@ -1,5 +1,5 @@
 """
-Main Gradio Application for Face Generator
+Main Gradio Application for AI Image Generator
 """
 
 import logging
@@ -14,7 +14,6 @@ except ImportError:
     exit(1)
 
 from services.generation_service import GenerationService
-from services.scoring_service import ScoringService
 from gradio_ui.generation_tab import GenerationTab
 
 # Configure logging
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class FaceGeneratorApp:
-    """Main application for face generation"""
+    """Main application for image generation"""
 
     def __init__(
         self,
@@ -54,7 +53,6 @@ class FaceGeneratorApp:
         # Initialize services
         logger.info("Initializing services...")
         self.generation_service = GenerationService(model_path=model_path)
-        self.scoring_service = ScoringService()
 
         # Build UI
         self.app = None
@@ -71,16 +69,16 @@ class FaceGeneratorApp:
         logger.info("Building Gradio interface...")
 
         with gr.Blocks(
-            title="多角度人脸生成器",
+            title="AI 图片生成器",
             theme=gr.themes.Soft(),
             css=self._get_custom_css()
         ) as app:
             # Header
             gr.Markdown(
                 """
-                # 🎭 多角度人脸生成器
+                # 🎨 AI 图片生成器
 
-                基于Stable Diffusion和InsightFace的AI人脸生成工具，支持多角度生成、质量评分和智能筛选。
+                基于 Stable Diffusion 的本地图片生成工具，输入提示词即可生成图片。
 
                 ---
                 """
@@ -91,7 +89,6 @@ class FaceGeneratorApp:
                 # Generation Tab
                 generation_tab = GenerationTab(
                     generation_service=self.generation_service,
-                    scoring_service=self.scoring_service,
                     default_output_dir=str(self.output_dir)
                 )
                 generation_tab.build()
@@ -108,8 +105,6 @@ class FaceGeneratorApp:
             gr.Markdown(
                 """
                 ---
-
-                💡 **提示**: 先在"多角度人脸生成"标签中生成图片，然后使用质量评分功能筛选最佳结果。
 
                 📧 **技术支持**: 遇到问题请查看帮助文档或提交Issue
                 """
@@ -134,20 +129,6 @@ class FaceGeneratorApp:
                     label="输出目录",
                     value=str(self.output_dir),
                     interactive=True
-                )
-
-            with gr.Column():
-                gr.Markdown("### 界面配置")
-                theme_dropdown = gr.Dropdown(
-                    choices=["default", "soft", "glass"],
-                    value="soft",
-                    label="主题风格"
-                )
-
-                language_dropdown = gr.Dropdown(
-                    choices=["中文", "English"],
-                    value="中文",
-                    label="语言 / Language"
                 )
 
         with gr.Row():
@@ -176,32 +157,20 @@ class FaceGeneratorApp:
             ### 快速开始
 
             1. **生成图片**
-               - 切换到"多角度人脸生成"标签
+               - 切换到"图片生成"标签
                - 输入生成提示词（例如："一位年轻女性的肖像，自然光照"）
                - 调整生成参数（数量、引导系数、推理步数）
                - 点击"生成图片"按钮
-
-            2. **质量评分**
-               - 确保"启用质量评分"选项已勾选
-               - 设置质量阈值（0.0-1.0，默认0.7）
-               - 生成后会自动显示每张图片的质量分数
-
-            3. **保存最佳图片**
-               - 生成完成后，点击"保存最佳图片"
-               - 只有质量分数 >= 阈值的图片会被保存
 
             ### 参数说明
 
             - **生成数量**: 一次生成的图片数量（1-10张）
             - **引导系数**: 控制生成结果与提示词的匹配程度（7.5-15.0效果较好）
             - **推理步数**: 生成过程中的迭代步数（越多越精细但越慢）
-            - **质量阈值**: 质量评分的最低要求（0.0-1.0）
 
             ### 技术架构
 
-            - **生成模型**: Stable Diffusion
-            - **人脸检测**: InsightFace
-            - **质量评分**: 深度学习质量评估模型
+            - **生成模型**: Stable Diffusion（本地推理，无需联网）
             - **界面框架**: Gradio
 
             ### 常见问题
@@ -209,17 +178,13 @@ class FaceGeneratorApp:
             **Q: 生成速度很慢怎么办？**
             A: 可以减少推理步数或生成数量。如果有GPU，确保正确安装了CUDA。
 
-            **Q: 质量评分不准确？**
-            A: 可以尝试调整质量阈值。不同风格的图片可能需要不同的阈值。
-
             **Q: 如何获得更好的生成效果？**
             A: 优化提示词描述，增加引导系数，或使用更多推理步数。
 
             ### 开发者信息
 
-            - 版本: 0.1.0
+            - 版本: 0.3.0
             - 许可: MIT License
-            - 源码: GitHub
             """
         )
 
@@ -285,7 +250,7 @@ class FaceGeneratorApp:
 
 def main():
     """Main entry point"""
-    parser = argparse.ArgumentParser(description="多角度人脸生成器")
+    parser = argparse.ArgumentParser(description="AI 图片生成器")
     parser.add_argument(
         "--model-path",
         type=str,

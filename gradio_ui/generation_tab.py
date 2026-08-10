@@ -1,10 +1,10 @@
 """
-Generation Tab for Gradio UI
+Generation Tab for Gradio UI - multi-model with per-model parameter adaptation
 """
 
 import logging
 from pathlib import Path
-from typing import Optional, List, Callable
+from typing import List, Tuple
 
 try:
     import gradio as gr
@@ -12,8 +12,7 @@ except ImportError:
     gr = None
 
 from services.generation_service import GenerationService
-from services.scoring_service import ScoringService
-
+from models_registry import available_models, get_model
 
 logger = logging.getLogger(__name__)
 
@@ -24,41 +23,44 @@ class GenerationTab:
     def __init__(
         self,
         generation_service: GenerationService,
-        scoring_service: ScoringService,
         default_output_dir: str = "output"
     ):
         """
         Initialize generation tab
 
         Args:
-            generation_service: Service for generating faces
-            scoring_service: Service for scoring and filtering
+            generation_service: Service for generating images
             default_output_dir: Default output directory
         """
         self.generation_service = generation_service
-        self.scoring_service = scoring_service
         self.default_output_dir = Path(default_output_dir)
 
         # Ensure output directory exists
         self.default_output_dir.mkdir(parents=True, exist_ok=True)
 
-        # UI state
-        self.current_batch_dir: Optional[Path] = None
-
+    # ------------------------------------------------------------------ #
+    # UI
+    # ------------------------------------------------------------------ #
     def build(self) -> gr.Tab:
-        """
-        Build the generation tab
-
-        Returns:
-            Gradio Tab object
-        """
+        """Build the generation tab"""
         if gr is None:
             raise ImportError("Gradio is not installed. Install with: pip install gradio")
 
-        with gr.Tab("多角度人脸生成") as tab:
-            gr.Markdown("## 生成多角度人脸图片")
+        with gr.Tab("图片生成") as tab:
+            gr.Markdown("## 图片生成")
 
-            # Input components
+            # Model selector
+            with gr.Row():
+                model_dropdown = gr.Dropdown(
+                    choices=list(available_models().keys()),
+                    value=self.generation_service.model_key,
+                    label="模型",
+                    info="切换模型后，下方参数会自动适配该模型的推荐值"
+                )
+
+            model_info = gr.Markdown(self._model_info_text(self.generation_service.model_key))
+
+            # Prompt inputs
             with gr.Row():
                 prompt_input = gr.Textbox(
                     label="生成提示词",
@@ -67,39 +69,25 @@ class GenerationTab:
                 )
 
             with gr.Row():
-                num_images = gr.Slider(
-                    minimum=1,
-                    maximum=10,
-                    value=4,
-                    step=1,
-                    label="生成数量"
-                )
-                guidance_scale = gr.Slider(
-                    minimum=1.0,
-                    maximum=20.0,
-                    value=7.5,
-                    step=0.5,
-                    label="引导系数"
-                )
-                num_inference_steps = gr.Slider(
-                    minimum=10,
-                    maximum=100,
-                    value=50,
-                    step=5,
-                    label="推理步数"
+                negative_prompt_input = gr.Textbox(
+                    label="负面提示词",
+                    placeholder="可选，描述不想要的内容",
+                    lines=2
                 )
 
+            # Parameter row (values/ranges adapt per model)
             with gr.Row():
-                enable_scoring = gr.Checkbox(
-                    value=True,
-                    label="启用质量评分"
+                num_images = gr.Slider(
+                    minimum=1, maximum=10, value=4, step=1, label="生成数量"
                 )
-                quality_threshold = gr.Slider(
-                    minimum=0.0,
-                    maximum=1.0,
-                    value=0.7,
-                    step=0.05,
-                    label="质量阈值"
+                guidance_scale = gr.Slider(
+                    minimum=1.0, maximum=20.0, value=7.5, step=0.5, label="引导系数"
+                )
+                num_inference_steps = gr.Slider(
+                    minimum=5, maximum=100, value=30, step=5, label="推理步数"
+                )
+                size_dropdown = gr.Dropdown(
+                    choices=["512x512"], value="512x512", label="分辨率"
                 )
 
             with gr.Row():
@@ -111,14 +99,13 @@ class GenerationTab:
             # Action buttons
             with gr.Row():
                 generate_btn = gr.Button("生成图片", variant="primary")
-                save_best_btn = gr.Button("保存最佳图片", variant="secondary")
 
             # Status output
             with gr.Row():
                 status_output = gr.Textbox(
                     label="状态",
                     interactive=False,
-                    lines=2
+                    lines=3
                 )
 
             # Gallery output
@@ -129,141 +116,130 @@ class GenerationTab:
                     height=400
                 )
 
-            # Metrics output
-            with gr.Row():
-                metrics_output = gr.JSON(
-                    label="质量指标"
-                )
-
             # Wire up events
-            generate_btn.click(
-                fn=self.generate_faces,
-                inputs=[
-                    prompt_input,
+            model_dropdown.change(
+                fn=self.on_model_change,
+                inputs=[model_dropdown],
+                outputs=[
+                    model_info,
+                    negative_prompt_input,
                     num_images,
                     guidance_scale,
                     num_inference_steps,
-                    enable_scoring,
-                    quality_threshold,
-                    output_dir_input
-                ],
-                outputs=[gallery_output, status_output, metrics_output]
+                    size_dropdown,
+                ]
             )
-
-            save_best_btn.click(
-                fn=self.save_best_faces,
-                inputs=[quality_threshold, output_dir_input],
-                outputs=[status_output]
+            generate_btn.click(
+                fn=self.generate_images,
+                inputs=[
+                    model_dropdown,
+                    prompt_input,
+                    negative_prompt_input,
+                    num_images,
+                    guidance_scale,
+                    num_inference_steps,
+                    size_dropdown,
+                    output_dir_input,
+                ],
+                outputs=[gallery_output, status_output]
             )
 
         return tab
 
-    def generate_faces(
+    def _model_info_text(self, model_key: str) -> str:
+        """Markdown summary shown above the parameter controls"""
+        spec = get_model(model_key)
+        return (
+            f"**当前模型：{spec['name']}** ｜ "
+            f"类型: {spec['type']} ｜ "
+            f"推荐分辨率: {spec['size_default']} ｜ "
+            f"推荐步数: {spec['steps_default']} ｜ "
+            f"推荐引导系数: {spec['guidance_default']}"
+        )
+
+    # ------------------------------------------------------------------ #
+    # Handlers
+    # ------------------------------------------------------------------ #
+    def on_model_change(self, model_key: str):
+        """
+        Adapt parameter controls to the selected model
+
+        Returns:
+            Tuple of gr.update() values for model_info, negative_prompt,
+            num_images, guidance_scale, num_inference_steps, size_dropdown
+        """
+        spec = get_model(model_key)
+        size_choices = [c[0] for c in spec["size_choices"]]
+        s_min, s_max, s_step = spec["steps_range"]
+        g_min, g_max, g_step = spec["guidance_range"]
+
+        return (
+            self._model_info_text(model_key),
+            gr.update(value=spec["negative_prompt_default"]),
+            gr.update(value=spec["num_images_default"]),
+            gr.update(value=spec["guidance_default"], minimum=g_min, maximum=g_max, step=g_step),
+            gr.update(value=spec["steps_default"], minimum=s_min, maximum=s_max, step=s_step),
+            gr.update(choices=size_choices, value=spec["size_default"]),
+        )
+
+    def generate_images(
         self,
+        model_key: str,
         prompt: str,
+        negative_prompt: str,
         num_images: int,
         guidance_scale: float,
         num_inference_steps: int,
-        enable_scoring: bool,
-        quality_threshold: float,
+        size_label: str,
         output_dir: str
-    ) -> tuple[List[tuple[str, str]], str, dict]:
-        """
-        Generate faces with optional scoring
-
-        Args:
-            prompt: Generation prompt
-            num_images: Number of images to generate
-            guidance_scale: Guidance scale for generation
-            num_inference_steps: Number of inference steps
-            enable_scoring: Whether to enable quality scoring
-            quality_threshold: Minimum quality threshold
-            output_dir: Output directory path
-
-        Returns:
-            Tuple of (gallery images, status message, metrics)
-        """
+    ) -> Tuple[List[Tuple[str, str]], str]:
+        """Generate images with the selected model and parameters"""
         try:
             if not prompt or not prompt.strip():
-                return [], "错误：请输入生成提示词", {}
+                return [], "错误：请输入生成提示词"
 
-            # Generate images
-            logger.info(f"Generating {num_images} images with prompt: {prompt}")
+            # Switch model if a different one was selected
+            if model_key != self.generation_service.model_key:
+                self.generation_service.switch_model(model_key)
+                logger.info(f"Model switched to {model_key}")
+
+            # Parse size label into width/height
+            width, height = 512, 512
+            for label, w, h in get_model(model_key)["size_choices"]:
+                if label == size_label:
+                    width, height = w, h
+                    break
+
+            logger.info(
+                f"Generating {num_images} images | model={model_key} | "
+                f"{width}x{height} | steps={num_inference_steps} | guidance={guidance_scale}"
+            )
             images, metadata = self.generation_service.generate_batch(
                 prompt=prompt,
                 num_images=num_images,
+                negative_prompt=negative_prompt or "",
                 guidance_scale=guidance_scale,
                 num_inference_steps=num_inference_steps,
+                width=width,
+                height=height,
                 output_dir=output_dir
             )
 
             if not images:
-                return [], "生成失败：未能生成任何图片", {}
+                return [], "生成失败：未能生成任何图片"
 
-            # Score images if enabled
-            scores = []
-            if enable_scoring:
-                logger.info("Scoring generated images...")
-                scores = self.scoring_service.score_batch(images)
-
-            # Create gallery format
-            gallery_images = []
-            for i, img in enumerate(images):
-                score = scores[i] if scores and i < len(scores) else 0.0
-                label = f"Image {i+1}" + (f" (Score: {score:.3f})" if scores else "")
-                gallery_images.append((img, label))
-
-            # Create status message
-            num_high_quality = sum(1 for s in scores if s >= quality_threshold) if scores else num_images
-            avg_score = sum(scores) / len(scores) if scores else 0.0
-
+            gallery_images = [(img, f"Image {i+1}") for i, img in enumerate(images)]
             status = (
-                f"成功生成 {len(images)} 张图片\n"
-                f"平均质量分数: {avg_score:.3f} | "
-                f"高质量图片: {num_high_quality}/{len(images)} (阈值: {quality_threshold:.2f})"
+                f"成功生成 {len(images)} 张图片"
+                f"（模型: {self.generation_service.get_current_model_name()}，"
+                f"{width}x{height}，{num_inference_steps} 步）"
             )
+            batch_dir = metadata.get("batch_id", "")
+            if batch_dir:
+                status += f"，保存至 {output_dir}/{batch_dir}"
 
-            # Create metrics
-            metrics = {
-                "total_generated": len(images),
-                "average_score": float(avg_score),
-                "high_quality_count": num_high_quality,
-                "scores": [float(s) for s in scores] if scores else []
-            }
-
-            # Store current batch for saving
-            self.current_batch_dir = Path(output_dir) / metadata.get("batch_id", "latest")
-
-            return gallery_images, status, metrics
+            return gallery_images, status
 
         except Exception as e:
-            logger.error(f"Error generating faces: {e}", exc_info=True)
-            return [], f"错误：{str(e)}", {}
-
-    def save_best_faces(
-        self,
-        quality_threshold: float,
-        output_dir: str
-    ) -> str:
-        """
-        Save best faces from current batch
-
-        Args:
-            quality_threshold: Minimum quality threshold
-            output_dir: Output directory path
-
-        Returns:
-            Status message
-        """
-        try:
-            if not self.current_batch_dir or not self.current_batch_dir.exists():
-                return "错误：没有可保存的图片批次。请先生成图片。"
-
-            # TODO: Implement loading and filtering from current_batch_dir
-            # This would load images, score them, and save those above threshold
-
-            return f"已保存质量分数 >= {quality_threshold:.2f} 的图片到 {output_dir}"
-
-        except Exception as e:
-            logger.error(f"Error saving faces: {e}", exc_info=True)
-            return f"错误：{str(e)}"
+            logger.error(f"Error generating images: {e}", exc_info=True)
+            return [], f"错误：{str(e)}"

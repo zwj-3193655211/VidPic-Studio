@@ -98,49 +98,6 @@ class TestGenerateSingle:
         assert image.size == (768, 768)
 
 
-class TestGenerateMultiAngle:
-    """Tests for multi-angle generation"""
-
-    @pytest.mark.skipif(True, reason="Requires actual model")
-    def test_generate_multi_angle(self, tmp_path):
-        """Test generating images from multiple angles"""
-        service = SDGenerationService()
-        service.load_model()
-
-        images, prompts = service.generate_multi_angle(
-            base_prompt="a young woman",
-            num_angles=4,
-            output_dir=str(tmp_path)
-        )
-
-        assert len(images) == 4
-        assert len(prompts) == 4
-        assert all(img is not None for img in images)
-
-    @pytest.mark.skipif(True, reason="Requires actual model")
-    def test_generate_multi_angle_custom(self, tmp_path):
-        """Test multi-angle generation with custom angles"""
-        service = SDGenerationService()
-        service.load_model()
-
-        custom_angles = [
-            "front view portrait",
-            "side profile facing left",
-            "three-quarter view",
-            "back of head"
-        ]
-
-        images, prompts = service.generate_multi_angle(
-            base_prompt="a woman",
-            custom_angles=custom_angles,
-            output_dir=str(tmp_path)
-        )
-
-        assert len(images) == 4
-        assert "front view" in prompts[0]
-        assert "side profile" in prompts[1]
-
-
 class TestGenerateBatch:
     """Tests for batch generation"""
 
@@ -159,33 +116,3 @@ class TestGenerateBatch:
         assert len(images) == 3
         assert "batch_id" in metadata
         assert metadata["num_images"] == 3
-
-
-class TestAnglePrompts:
-    """Tests for angle prompt generation"""
-
-    def test_generate_angle_prompts_default(self):
-        """Test generating default angle prompts"""
-        service = SDGenerationService()
-
-        prompts = service._generate_angle_prompts(
-            base_prompt="a young woman",
-            num_angles=4
-        )
-
-        assert len(prompts) == 4
-        assert "young woman" in prompts[0]
-
-    def test_generate_angle_prompts_custom(self):
-        """Test generating custom angle prompts"""
-        service = SDGenerationService()
-
-        custom_angles = ["front view", "side view"]
-        prompts = service._generate_angle_prompts(
-            base_prompt="a woman",
-            custom_angles=custom_angles
-        )
-
-        assert len(prompts) == 2
-        assert "front view" in prompts[0]
-        assert "side view" in prompts[1]

@@ -1,7 +1,8 @@
 """
-Stable Diffusion Generation Service
+Stable Diffusion Generation Service - multi-model support
 """
 
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -12,33 +13,29 @@ import torch
 from PIL import Image
 
 try:
-    from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
-    from transformers import CLIPTextModel, CLIPTokenizer
+    from diffusers import (
+        StableDiffusionPipeline,
+        StableDiffusionXLPipeline,
+        DPMSolverMultistepScheduler,
+    )
 except ImportError:
     StableDiffusionPipeline = None
+    StableDiffusionXLPipeline = None
     DPMSolverMultistepScheduler = None
 
 logger = logging.getLogger(__name__)
 
 
 class SDGenerationService:
-    """Service for generating images using Stable Diffusion"""
-
-    # Default angle modifiers for multi-angle generation
-    DEFAULT_ANGLES = [
-        "front view portrait, facing forward",
-        "three-quarter view, slightly turned to the left",
-        "profile view facing right, side portrait",
-        "three-quarter view, slightly turned to the right",
-        "back view, showing the back of the head",
-        "looking up, slightly elevated angle",
-        "looking down, slightly lowered angle",
-        "tilted head, artistic pose"
-    ]
+    """Service for generating images using Stable Diffusion (SD1.5 / SDXL / single-file checkpoints)"""
 
     def __init__(
         self,
         model_name: str = "runwayml/stable-diffusion-v1-5",
+        model_type: str = "diffusers",
+        base_dir: str = None,
+        width: int = 512,
+        height: int = 512,
         device: str = None,
         use_float16: bool = True,
         enable_attention_slicing: bool = True
@@ -47,7 +44,11 @@ class SDGenerationService:
         Initialize SD Generation Service
 
         Args:
-            model_name: HuggingFace model ID or local path
+            model_name: HuggingFace model ID, local diffusers dir, or single-file checkpoint path
+            model_type: "diffusers" (dir/repo-id) or "sdxl_single_file" (SDXL ckpt + base_dir)
+            base_dir: SDXL base components dir (required for sdxl_single_file)
+            width: Default image width
+            height: Default image height
             device: Device to use ('cuda', 'cpu', or None for auto)
             use_float16: Whether to use float16 precision (faster, less memory)
             enable_attention_slicing: Whether to enable attention slicing (saves memory)
@@ -59,6 +60,11 @@ class SDGenerationService:
             )
 
         self.model_name = model_name
+        self.model_type = model_type
+        self.base_dir = base_dir
+        self.width = width
+        self.height = height
+
         # Auto-detect device if not specified
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -69,254 +75,221 @@ class SDGenerationService:
         self.enable_attention_slicing = enable_attention_slicing
 
         # Pipeline (loaded lazily)
-        self.pipeline: Optional[StableDiffusionPipeline] = None
+        self.pipeline = None
         self.model_loaded = False
 
-        logger.info(f"Initialized SDGenerationService with model: {model_name}")
+        logger.info(f"Initialized SDGenerationService with model: {model_name} (type={model_type})")
         logger.info(f"Device: {self.device}, Float16: {self.use_float16}")
 
-    def load_model(self):
-        """
-        Load the Stable Diffusion model
+    # ------------------------------------------------------------------ #
+    # Model loading
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _has_fp16_variants(model_dir: str) -> bool:
+        """True if the dir contains *.fp16.safetensors variant files"""
+        base = Path(model_dir)
+        if not base.is_dir():
+            return False
+        return any(p.name.endswith(".fp16.safetensors") for p in base.rglob("*"))
 
-        This is a lazy-loading method that downloads and loads the model
-        only when needed.
-        """
+    def _detect_pipeline_class(self, model_dir: str):
+        """Read model_index.json to pick the right pipeline class"""
+        index_path = Path(model_dir) / "model_index.json"
+        if index_path.exists():
+            try:
+                idx = json.loads(index_path.read_text(encoding="utf-8"))
+                class_name = idx.get("_class_name", "")
+                if "XL" in class_name:
+                    return StableDiffusionXLPipeline
+            except Exception:
+                pass
+        return StableDiffusionPipeline
+
+    def load_model(self):
+        """Load the model (lazy: only when first generation is requested)"""
         if self.model_loaded:
             logger.info("Model already loaded")
             return
 
         logger.info(f"Loading model: {self.model_name}...")
-
         try:
-            # Load model
-            self.pipeline = StableDiffusionPipeline.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float16 if self.use_float16 else torch.float32,
-                safety_checker=None,  # Disable safety checker for speed
-                requires_safety_checker=False
-            )
+            if self.model_type == "sdxl_single_file":
+                self.pipeline = self._load_sdxl_single_file()
+            else:
+                self.pipeline = self._load_diffusers_dir()
 
-            # Use better scheduler
+            # Use a faster scheduler
             self.pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
                 self.pipeline.scheduler.config
             )
 
-            # Enable memory optimizations
-            if self.enable_attention_slicing:
-                self.pipeline.enable_attention_slicing()
+            self._apply_memory_opts()
 
-            # Move to device
-            self.pipeline = self.pipeline.to(self.device)
-
-            # Enable memory-efficient attention if available
-            if hasattr(self.pipeline, "enable_xformers_memory_efficient_attention"):
-                try:
-                    self.pipeline.enable_xformers_memory_efficient_attention()
-                    logger.info("Enabled xformers memory efficient attention")
-                except Exception:
-                    logger.info("xformers not available, using default attention")
-
+            if not getattr(self, "model_offloaded", False):
+                self.pipeline = self.pipeline.to(self.device)
             self.model_loaded = True
             logger.info("Model loaded successfully")
-
         except Exception as e:
             logger.error(f"Failed to load model: {e}", exc_info=True)
             raise
 
+    def _apply_memory_opts(self):
+        """Memory optimizations for 8GB-class GPUs"""
+        if isinstance(self.pipeline, StableDiffusionXLPipeline):
+            try:
+                self.pipeline.enable_vae_tiling()
+            except Exception:
+                pass
+            # VAE must stay in float32 to avoid the "modules should be kept in
+            # float32" warning and eliminate possible colour-banding artefacts.
+            # The VAE is only ~167 MB so this has negligible VRAM impact.
+            try:
+                self.pipeline.vae.to(dtype=torch.float32)
+            except Exception:
+                pass
+            if self.enable_attention_slicing:
+                try:
+                    self.pipeline.enable_model_cpu_offload()
+                    self.model_offloaded = True
+                except Exception as e:
+                    logger.warning(f"model_cpu_offload unavailable: {e}")
+        elif self.enable_attention_slicing:
+            self.pipeline.enable_attention_slicing()
+
+    def _load_diffusers_dir(self):
+        """Load from a diffusers directory or repo id"""
+        model_name = self.model_name
+        dtype = torch.float16 if self.use_float16 else torch.float32
+
+        # If it's a local directory, auto-detect the pipeline class and fp16 variants
+        if Path(model_name).is_dir() and (Path(model_name) / "model_index.json").exists():
+            pipeline_cls = self._detect_pipeline_class(model_name)
+            kwargs = dict(
+                torch_dtype=dtype,
+                safety_checker=None,
+                requires_safety_checker=False,
+            )
+            if self.use_float16 and self._has_fp16_variants(model_name):
+                kwargs["variant"] = "fp16"
+            return pipeline_cls.from_pretrained(model_name, **kwargs)
+
+        # Fallback: classic SD1.5 pipeline (repo id or other local dir)
+        return StableDiffusionPipeline.from_pretrained(
+            model_name,
+            torch_dtype=dtype,
+            safety_checker=None,
+            requires_safety_checker=False
+        )
+
+    def _load_sdxl_single_file(self):
+        """
+        Load an SDXL single-file checkpoint using a LOCAL diffusers base dir as
+        the architecture config (fully offline; diffusers does the LDM->diffusers
+        conversion internally).
+        """
+        if not self.base_dir or not Path(self.base_dir).is_dir():
+            raise FileNotFoundError(
+                f"SDXL base components dir not found: {self.base_dir}. "
+                "Download with: snapshot_download('AI-ModelScope/stable-diffusion-xl-base-1.0', ...)"
+            )
+        if not Path(self.model_name).is_file():
+            raise FileNotFoundError(f"SDXL checkpoint not found: {self.model_name}")
+
+        dtype = torch.float16 if self.use_float16 else torch.float32
+        return StableDiffusionXLPipeline.from_single_file(
+            self.model_name,
+            torch_dtype=dtype,
+            config=self.base_dir,        # local diffusers repo with architecture configs
+            local_files_only=True,       # never touch the network
+            safety_checker=None,
+            requires_safety_checker=False,
+        )
+
+    def unload_model(self):
+        """Unload the model to free memory"""
+        if self.pipeline is not None:
+            del self.pipeline
+            self.pipeline = None
+            self.model_loaded = False
+
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
+
+            logger.info("Model unloaded from memory")
+
+    # ------------------------------------------------------------------ #
+    # Generation
+    # ------------------------------------------------------------------ #
     def generate_single(
         self,
         prompt: str,
         negative_prompt: str = "",
-        num_inference_steps: int = 50,
+        num_inference_steps: int = 30,
         guidance_scale: float = 7.5,
-        width: int = 512,
-        height: int = 512,
+        width: int = None,
+        height: int = None,
         seed: int = None,
         output_dir: str = None,
         save_image: bool = True
     ) -> Image.Image:
-        """
-        Generate a single image
-
-        Args:
-            prompt: Text prompt for generation
-            negative_prompt: Negative prompt to avoid certain features
-            num_inference_steps: Number of denoising steps
-            guidance_scale: Guidance scale for generation
-            width: Image width
-            height: Image height
-            seed: Random seed for reproducibility
-            output_dir: Directory to save the image
-            save_image: Whether to save the image to disk
-
-        Returns:
-            Generated PIL Image
-        """
+        """Generate a single image"""
         if not self.model_loaded:
             self.load_model()
 
-        logger.info(f"Generating image with prompt: {prompt}")
+        width = width or self.width
+        height = height or self.height
+        logger.info(f"Generating image with prompt: {prompt} ({width}x{height}, {num_inference_steps} steps)")
 
-        # Set seed if specified
         generator = None
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
-        # Generate image
         with torch.inference_mode():
             result = self.pipeline(
                 prompt=prompt,
-                negative_prompt=negative_prompt,
+                negative_prompt=negative_prompt or None,
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
                 width=width,
                 height=height,
                 generator=generator
             )
-
         image = result.images[0]
 
-        # Save image if requested
         if save_image and output_dir:
-            output_path = Path(output_dir)
-            output_path.mkdir(parents=True, exist_ok=True)
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"generated_{timestamp}_{uuid.uuid4().hex[:8]}.png"
-            image.save(output_path / filename)
-            logger.info(f"Saved image to: {output_path / filename}")
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            path = Path(output_dir) / f"image_{datetime.now().strftime('%H%M%S')}.png"
+            image.save(path)
+            logger.info(f"Saved image to: {path}")
 
         return image
-
-    def _generate_angle_prompts(
-        self,
-        base_prompt: str,
-        num_angles: int = 4,
-        custom_angles: List[str] = None
-    ) -> List[str]:
-        """
-        Generate prompts for different angles
-
-        Args:
-            base_prompt: Base prompt describing the subject
-            num_angles: Number of angles to generate
-            custom_angles: Custom angle descriptions
-
-        Returns:
-            List of prompts with angle modifiers
-        """
-        if custom_angles:
-            angles = custom_angles
-        else:
-            angles = self.DEFAULT_ANGLES[:num_angles]
-
-        prompts = []
-        for angle in angles:
-            prompt = f"{base_prompt}, {angle}, high quality, detailed"
-            prompts.append(prompt)
-
-        return prompts
-
-    def generate_multi_angle(
-        self,
-        base_prompt: str,
-        num_angles: int = 4,
-        custom_angles: List[str] = None,
-        num_inference_steps: int = 50,
-        guidance_scale: float = 7.5,
-        width: int = 512,
-        height: int = 512,
-        output_dir: str = None
-    ) -> Tuple[List[Image.Image], List[str]]:
-        """
-        Generate images from multiple angles
-
-        Args:
-            base_prompt: Base prompt describing the subject
-            num_angles: Number of angles to generate
-            custom_angles: Custom angle descriptions
-            num_inference_steps: Number of denoising steps
-            guidance_scale: Guidance scale for generation
-            width: Image width
-            height: Image height
-            output_dir: Directory to save images
-
-        Returns:
-            Tuple of (list of images, list of prompts used)
-        """
-        logger.info(f"Generating {num_angles} multi-angle images")
-
-        # Generate prompts for each angle
-        prompts = self._generate_angle_prompts(
-            base_prompt=base_prompt,
-            num_angles=num_angles,
-            custom_angles=custom_angles
-        )
-
-        # Generate images
-        images = []
-        for i, prompt in enumerate(prompts):
-            logger.info(f"Generating angle {i+1}/{num_angles}: {prompt}")
-
-            image = self.generate_single(
-                prompt=prompt,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                width=width,
-                height=height,
-                output_dir=output_dir,
-                save_image=(output_dir is not None)
-            )
-
-            images.append(image)
-
-        logger.info(f"Generated {len(images)} multi-angle images")
-        return images, prompts
 
     def generate_batch(
         self,
         prompt: str,
         num_images: int = 4,
         negative_prompt: str = "",
-        num_inference_steps: int = 50,
+        num_inference_steps: int = 30,
         guidance_scale: float = 7.5,
-        width: int = 512,
-        height: int = 512,
+        width: int = None,
+        height: int = None,
         output_dir: str = None
     ) -> Tuple[List[Image.Image], Dict[str, Any]]:
-        """
-        Generate a batch of images with the same prompt
-
-        Args:
-            prompt: Text prompt for generation
-            num_images: Number of images to generate
-            negative_prompt: Negative prompt
-            num_inference_steps: Number of denoising steps
-            guidance_scale: Guidance scale
-            width: Image width
-            height: Image height
-            output_dir: Directory to save images
-
-        Returns:
-            Tuple of (list of images, metadata dict)
-        """
+        """Generate a batch of images with the same prompt"""
         logger.info(f"Generating batch of {num_images} images")
 
-        # Create batch ID
-        batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        width = width or self.width
+        height = height or self.height
 
-        # Save batch directory
+        batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
         batch_dir = None
         if output_dir:
             batch_dir = Path(output_dir) / batch_id
             batch_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate images
         images = []
         for i in range(num_images):
             logger.info(f"Generating image {i+1}/{num_images}")
-
             image = self.generate_single(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
@@ -327,10 +300,8 @@ class SDGenerationService:
                 output_dir=str(batch_dir) if batch_dir else None,
                 save_image=(batch_dir is not None)
             )
-
             images.append(image)
 
-        # Create metadata
         metadata = {
             "batch_id": batch_id,
             "prompt": prompt,
@@ -347,16 +318,3 @@ class SDGenerationService:
 
         logger.info(f"Generated {len(images)} images in batch {batch_id}")
         return images, metadata
-
-    def unload_model(self):
-        """Unload the model to free memory"""
-        if self.pipeline is not None:
-            del self.pipeline
-            self.pipeline = None
-            self.model_loaded = False
-
-            # Clear GPU cache
-            if self.device == "cuda":
-                torch.cuda.empty_cache()
-
-            logger.info("Model unloaded from memory")
