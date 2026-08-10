@@ -10,7 +10,7 @@
 
 import os
 
-# 项目根目录（向上找一级，即 face-generator/）
+# 项目根目录（向上找一级，即项目根目录）
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _MODELS_DIR = os.path.join(_PROJECT_ROOT, "models")
 

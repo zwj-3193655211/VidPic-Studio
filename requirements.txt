@@ -21,3 +21,9 @@ safetensors>=0.4.0
 
 # Development dependencies
 pytest>=7.4.0
+
+# Video generation (LTX-Video) + export
+imageio>=2.30.0
+imageio-ffmpeg>=0.4.9
+sentencepiece>=0.1.99
+protobuf>=3.20.0

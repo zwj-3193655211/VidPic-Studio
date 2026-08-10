@@ -14,7 +14,9 @@ except ImportError:
     exit(1)
 
 from services.generation_service import GenerationService
+from services.ltx_video_service import LTXVideoService
 from gradio_ui.generation_tab import GenerationTab
+from gradio_ui.video_generation_tab import VideoGenerationTab
 
 # Configure logging
 logging.basicConfig(
@@ -80,6 +82,7 @@ class FaceGeneratorApp:
         # Initialize services
         logger.info("Initializing services...")
         self.generation_service = GenerationService(model_path=model_path)
+        self.video_service = LTXVideoService()
 
         # Build UI
         self.app = None
@@ -96,14 +99,14 @@ class FaceGeneratorApp:
         logger.info("Building Gradio interface...")
 
         with gr.Blocks(
-            title="AI 图片生成器"
+            title="VidPic Studio - AI 图影工坊"
         ) as app:
             # Header
             gr.Markdown(
                 """
-                # 🎨 AI 图片生成器
+                # 🎬 VidPic Studio · AI 图影工坊
 
-                基于 Stable Diffusion 的本地图片生成工具，输入提示词即可生成图片。
+                基于 Stable Diffusion / LTX-Video 的本地图文视频生成工具，输入提示词即可生成图片或短视频。
 
                 ---
                 """
@@ -114,9 +117,18 @@ class FaceGeneratorApp:
                 # Generation Tab
                 generation_tab = GenerationTab(
                     generation_service=self.generation_service,
-                    default_output_dir=str(self.output_dir)
+                    default_output_dir=str(self.output_dir),
+                    on_before_generate=self._unload_video_model
                 )
                 generation_tab.build()
+
+                # Video Generation Tab
+                video_tab = VideoGenerationTab(
+                    video_service=self.video_service,
+                    default_output_dir=str(self.output_dir),
+                    on_before_generate=self._unload_sd_model
+                )
+                video_tab.build()
 
                 # Settings Tab
                 with gr.Tab("⚙️ 设置"):
@@ -136,6 +148,24 @@ class FaceGeneratorApp:
             )
 
         return app
+
+    def _unload_video_model(self):
+        """Free VRAM held by the video model before image generation"""
+        try:
+            if self.video_service.model_loaded:
+                logger.info("Unloading video model before image generation")
+                self.video_service.unload_model()
+        except Exception as e:
+            logger.warning(f"Failed to unload video model: {e}")
+
+    def _unload_sd_model(self):
+        """Free VRAM held by image models before video generation"""
+        try:
+            if self.generation_service.sd_service is not None:
+                logger.info("Unloading image model before video generation")
+                self.generation_service.unload_model()
+        except Exception as e:
+            logger.warning(f"Failed to unload image model: {e}")
 
     def _build_settings_tab(self):
         """Build the settings tab"""
@@ -277,7 +307,7 @@ class FaceGeneratorApp:
 
 def main():
     """Main entry point"""
-    parser = argparse.ArgumentParser(description="AI 图片生成器")
+    parser = argparse.ArgumentParser(description="VidPic Studio - AI 图影工坊")
     parser.add_argument(
         "--model-path",
         type=str,

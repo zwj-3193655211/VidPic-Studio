@@ -23,7 +23,8 @@ class GenerationTab:
     def __init__(
         self,
         generation_service: GenerationService,
-        default_output_dir: str = "output"
+        default_output_dir: str = "output",
+        on_before_generate=None,
     ):
         """
         Initialize generation tab
@@ -31,9 +32,12 @@ class GenerationTab:
         Args:
             generation_service: Service for generating images
             default_output_dir: Default output directory
+            on_before_generate: Optional callback invoked before generating
+                (used to unload the video model and free VRAM)
         """
         self.generation_service = generation_service
         self.default_output_dir = Path(default_output_dir)
+        self.on_before_generate = on_before_generate
 
         # Ensure output directory exists
         self.default_output_dir.mkdir(parents=True, exist_ok=True)
@@ -222,6 +226,10 @@ class GenerationTab:
         try:
             if not prompt or not prompt.strip():
                 return [], "错误：请输入生成提示词"
+
+            # Free VRAM used by the video model before image generation
+            if self.on_before_generate:
+                self.on_before_generate()
 
             # Switch model if a different one was selected
             if model_key != self.generation_service.model_key:
