@@ -24,7 +24,7 @@ SIZE_CHOICES = [
 FRAMES_CHOICES = [
     ("约 2 秒 (49 帧)", 49),
     ("约 4 秒 (97 帧)", 97),
-    ("约 5 秒 (121 帧)", 121),
+    ("约 5 秒 (121 帧，⚠ 8GB卡易爆显存)", 121),
 ]
 
 
@@ -68,14 +68,20 @@ class VideoGenerationTab:
                     info="不想要的内容，如：blurry, low quality, distorted",
                 )
 
-            # Reference image (image-to-video)
-            with gr.Row():
+            # Reference image (image-to-video) — coming soon
+            # (I2V via from_pipe has a known diffusers 0.39 + cpu_offload bug;
+            #  tracked for future resolution)
+            with gr.Row(visible=False) as _i2v_row:
                 ref_image_input = gr.Image(
-                    label="参考图（图生视频，可选）",
+                    label="参考图（图生视频，即将上线）",
                     type="pil",
                     sources=["upload", "clipboard"],
                     show_label=True,
-                    placeholder="上传图片作为视频起始帧；留空则为纯文生视频",
+                    placeholder="图生视频功能正在调试中，敬请期待",
+                )
+            with gr.Row():
+                gr.Markdown(
+                    "💡 图生视频（上传参考图作为视频起始帧）功能正在调试中，当前暂不可用。"
                 )
 
             with gr.Row():
