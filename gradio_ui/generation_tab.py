@@ -64,9 +64,9 @@ class GenerationTab:
             with gr.Row():
                 prompt_input = gr.Textbox(
                     label="生成提示词",
-                    placeholder="例如：一位年轻女性的肖像，自然光照",
+                    placeholder="例如：a young woman portrait, soft natural light",
                     lines=3,
-                    info="描述你想生成的画面，越具体效果越好（支持中文）。可包含主体、环境、光线、风格等",
+                    info="描述你想生成的画面，越具体效果越好。建议使用英文提示词（模型在英文语料上训练，效果最佳）；中文也能识别，但效果会打折扣",
                 )
 
             with gr.Row():

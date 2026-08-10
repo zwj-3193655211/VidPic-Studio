@@ -183,7 +183,7 @@ class FaceGeneratorApp:
 
             1. **生成图片**
                - 切换到"图片生成"标签
-               - 输入生成提示词（例如："一位年轻女性的肖像，自然光照"）
+               - 输入生成提示词（建议英文，效果最佳，例如：`a young woman portrait, soft natural light`）
                - 调整生成参数（数量、引导系数、推理步数）
                - 点击"生成图片"按钮
 
