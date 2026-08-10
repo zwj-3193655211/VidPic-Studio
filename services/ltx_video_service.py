@@ -12,10 +12,11 @@ import torch
 from PIL import Image
 
 try:
-    from diffusers import LTXPipeline
+    from diffusers import LTXPipeline, LTXImageToVideoPipeline
     from diffusers.utils import export_to_video
 except ImportError:
     LTXPipeline = None
+    LTXImageToVideoPipeline = None
     export_to_video = None
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class LTXVideoService:
         self.model_dir = str(model_dir or _DEFAULT_MODEL_DIR)
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.pipeline = None
+        self._i2v_pipeline = None
         self.model_loaded = False
 
         logger.info(f"Initialized LTXVideoService (model: {self.model_dir}, device: {self.device})")
@@ -72,6 +74,7 @@ class LTXVideoService:
         )
         # 8GB GPU: keep weights in RAM, stream modules to GPU when needed
         self.pipeline.enable_model_cpu_offload()
+        self._i2v_pipeline = None
         self.model_loaded = True
         logger.info("LTX-Video model loaded (float16 + cpu offload)")
 
@@ -79,6 +82,7 @@ class LTXVideoService:
         if self.pipeline is not None:
             del self.pipeline
             self.pipeline = None
+            self._i2v_pipeline = None
             self.model_loaded = False
             if self.device == "cuda":
                 torch.cuda.empty_cache()
@@ -87,6 +91,15 @@ class LTXVideoService:
     # ------------------------------------------------------------------ #
     # Generation
     # ------------------------------------------------------------------ #
+    def _get_i2v_pipeline(self):
+        """Lazily build the image-to-video pipeline from the loaded T2V pipeline.
+        Shares model weights via `from_pipe` (zero extra VRAM, no reload)."""
+        if self._i2v_pipeline is not None:
+            return self._i2v_pipeline
+        self._i2v_pipeline = LTXImageToVideoPipeline.from_pipe(self.pipeline)
+        logger.info("LTXImageToVideoPipeline wrapper created (shared components)")
+        return self._i2v_pipeline
+
     def generate_video(
         self,
         prompt: str,
@@ -97,11 +110,16 @@ class LTXVideoService:
         num_inference_steps: int = 40,
         guidance_scale: float = 3.0,
         seed: int = None,
+        init_image: Image.Image = None,
         output_dir: str = None,
         save: bool = True,
     ) -> Dict[str, Any]:
-        """Generate a short video. Returns metadata dict with 'mp4_path' (if saved),
-        'frames', 'fps' and 'duration_seconds'."""
+        """Generate a short video.
+
+        If `init_image` is provided, runs image-to-video with the reference
+        as the starting frame. Returns metadata dict with 'mp4_path' (if saved),
+        'frames', 'fps' and 'duration_seconds'.
+        """
         if not self.model_loaded:
             self.load_model()
 
@@ -112,19 +130,34 @@ class LTXVideoService:
         logger.info(
             f"Generating video: {prompt[:80]}... | {width}x{height} | "
             f"{num_frames} frames | {num_inference_steps} steps | guidance={guidance_scale}"
+            f" | mode={'I2V' if init_image is not None else 'T2V'}"
         )
 
         with torch.inference_mode():
-            result = self.pipeline(
-                prompt=prompt,
-                negative_prompt=negative_prompt or None,
-                height=height,
-                width=width,
-                num_frames=num_frames,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                generator=generator,
-            )
+            if init_image is not None:
+                pipe = self._get_i2v_pipeline()
+                result = pipe(
+                    image=init_image,
+                    prompt=prompt,
+                    negative_prompt=negative_prompt or None,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                )
+            else:
+                result = self.pipeline(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt or None,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                )
 
         frames: List[Image.Image] = result.frames[0]
         fps = getattr(result, "fps", 25)

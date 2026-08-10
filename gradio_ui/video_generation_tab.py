@@ -68,6 +68,16 @@ class VideoGenerationTab:
                     info="不想要的内容，如：blurry, low quality, distorted",
                 )
 
+            # Reference image (image-to-video)
+            with gr.Row():
+                ref_image_input = gr.Image(
+                    label="参考图（图生视频，可选）",
+                    type="pil",
+                    sources=["upload", "clipboard"],
+                    show_label=True,
+                    placeholder="上传图片作为视频起始帧；留空则为纯文生视频",
+                )
+
             with gr.Row():
                 size_dropdown = gr.Dropdown(
                     choices=[c[0] for c in SIZE_CHOICES],
@@ -108,6 +118,7 @@ class VideoGenerationTab:
                     frames_dropdown,
                     num_inference_steps,
                     output_dir_input,
+                    ref_image_input,
                 ],
                 outputs=[video_output, status_output],
             )
@@ -125,6 +136,7 @@ class VideoGenerationTab:
         frames_label: str,
         num_inference_steps: int,
         output_dir: str,
+        ref_image=None,
     ) -> Tuple[str, str]:
         """Generate a video; returns (video_path_or_None, status_text)"""
         try:
@@ -156,6 +168,7 @@ class VideoGenerationTab:
             logger.info(
                 f"Generating video | {width}x{height} | {num_frames} frames | "
                 f"{num_inference_steps} steps | prompt: {prompt[:80]}"
+                f" | mode={'I2V' if ref_image is not None else 'T2V'}"
             )
             meta = self.video_service.generate_video(
                 prompt=prompt,
@@ -164,6 +177,7 @@ class VideoGenerationTab:
                 width=width,
                 num_frames=num_frames,
                 num_inference_steps=int(num_inference_steps),
+                init_image=ref_image,
                 output_dir=output_dir,
                 save=True,
             )
@@ -172,8 +186,9 @@ class VideoGenerationTab:
             if not mp4:
                 return None, "生成失败：视频导出失败"
 
+            mode = "图生视频" if ref_image is not None else "文生视频"
             status = (
-                f"✅ 视频生成完成：{meta['duration_seconds']} 秒，"
+                f"✅ {mode}完成：{meta['duration_seconds']} 秒，"
                 f"{meta['width']}x{meta['height']}，{meta['num_frames']} 帧，"
                 f"{num_inference_steps} 步\n保存至 {mp4}"
             )
