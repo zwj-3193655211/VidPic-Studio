@@ -28,20 +28,17 @@ if exist ".venv\Scripts\python.exe" (
     )
 )
 
-REM ---- 本地模型检测（魔搭下载的 SD1.5，有则免联网）----
-set "LOCAL_MODEL=%USERPROFILE%\.cache\modelscope\models\AI-ModelScope--stable-diffusion-v1-5\snapshots\master"
+REM ---- 本地模型检测（models/ 目录，models_registry 自动管理，免联网）----
 set "MODEL_ARGS="
-if exist "%LOCAL_MODEL%\model_index.json" (
-    set "MODEL_ARGS=--model-path %LOCAL_MODEL%"
-    echo [模型：本地魔搭 SD1.5，无需联网]
+if exist "models\sd15\model_index.json" (
+    echo [模型：本地模型已就绪（models/ 下 sd15、sdxl_base、moyu_xl、realvisxl）]
 ) else (
-    echo [模型：在线 HuggingFace SD1.5，首次生成需下载约 4GB]
+    echo [模型：未检测到本地模型，首次生成需在线下载]
 )
 
-REM ---- HuggingFace 网络加速（仅在线下载时需要）----
-set "HTTP_PROXY=http://127.0.0.1:33210"
-set "HTTPS_PROXY=http://127.0.0.1:33210"
-set "NO_PROXY=127.0.0.1,localhost"
+REM ---- 网络说明：本地推理无需联网。如需在线下载模型，请直连 hf-mirror ----
+REM 不要设置本地代理（clash 代理是坏的），下载时用：
+REM   set "HF_ENDPOINT=https://hf-mirror.com"
 
 REM ---- 检查 Python 是否可用 ----
 "%PYTHON%" --version >nul 2>&1
