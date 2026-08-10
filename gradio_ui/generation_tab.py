@@ -81,7 +81,8 @@ class GenerationTab:
                     label="参考图（图生图，可选）",
                     type="pil",
                     sources=["upload", "clipboard"],
-                    info="上传图片后按参考图构图/风格生成；留空则为纯文生图",
+                    show_label=True,
+                    placeholder="上传图片后按参考图构图/风格生成；留空则为纯文生图",
                 )
                 strength_input = gr.Slider(
                     minimum=0.1, maximum=1.0, value=0.75, step=0.05,

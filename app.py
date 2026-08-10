@@ -96,9 +96,7 @@ class FaceGeneratorApp:
         logger.info("Building Gradio interface...")
 
         with gr.Blocks(
-            title="AI 图片生成器",
-            theme=gr.themes.Soft(),
-            css=self._get_custom_css()
+            title="AI 图片生成器"
         ) as app:
             # Header
             gr.Markdown(
@@ -271,7 +269,9 @@ class FaceGeneratorApp:
             server_port=7860,
             share=self.share,
             show_error=True,
-            quiet=False
+            quiet=False,
+            theme=gr.themes.Soft(),
+            css=self._get_custom_css(),
         )
 
 
