@@ -14,9 +14,7 @@ except ImportError:
     exit(1)
 
 from services.generation_service import GenerationService
-from services.ltx_video_service import LTXVideoService
 from gradio_ui.generation_tab import GenerationTab
-from gradio_ui.video_generation_tab import VideoGenerationTab
 
 # Configure logging
 logging.basicConfig(
@@ -42,10 +40,15 @@ class _ServerNoiseFilter(logging.Filter):
         msg = record.getMessage()
         if "Invalid HTTP request received" in msg:
             return False
-        if "Exception in callback" in msg and (
-            "ConnectionResetError" in msg or "WinError 10054" in msg
-        ):
-            return False
+        # asyncio Proactor "Exception in callback ... _call_connection_lost"
+        # noise on Windows. The actual WinError lives in record.exc_info, NOT in
+        # getMessage() (which only holds the first log line), so we must inspect
+        # the exception object itself. WinError 10054 -> ConnectionResetError,
+        # 10053 -> ConnectionAbortedError (both subclasses of ConnectionError).
+        if "Exception in callback" in msg and record.exc_info:
+            exc = record.exc_info[1]
+            if isinstance(exc, ConnectionError):
+                return False
         return True
 
 
@@ -82,7 +85,6 @@ class FaceGeneratorApp:
         # Initialize services
         logger.info("Initializing services...")
         self.generation_service = GenerationService(model_path=model_path)
-        self.video_service = LTXVideoService()
 
         # Build UI
         self.app = None
@@ -106,7 +108,7 @@ class FaceGeneratorApp:
                 """
                 # 🎬 VidPic Studio · AI 图影工坊
 
-                基于 Stable Diffusion / LTX-Video 的本地图文视频生成工具，输入提示词即可生成图片或短视频。
+                基于 Stable Diffusion 的本地图片生成工具，输入提示词即可生成图片。
 
                 ---
                 """
@@ -117,18 +119,9 @@ class FaceGeneratorApp:
                 # Generation Tab
                 generation_tab = GenerationTab(
                     generation_service=self.generation_service,
-                    default_output_dir=str(self.output_dir),
-                    on_before_generate=self._unload_video_model
+                    default_output_dir=str(self.output_dir)
                 )
                 generation_tab.build()
-
-                # Video Generation Tab
-                video_tab = VideoGenerationTab(
-                    video_service=self.video_service,
-                    default_output_dir=str(self.output_dir),
-                    on_before_generate=self._unload_sd_model
-                )
-                video_tab.build()
 
                 # Settings Tab
                 with gr.Tab("⚙️ 设置"):
@@ -148,24 +141,6 @@ class FaceGeneratorApp:
             )
 
         return app
-
-    def _unload_video_model(self):
-        """Free VRAM held by the video model before image generation"""
-        try:
-            if self.video_service.model_loaded:
-                logger.info("Unloading video model before image generation")
-                self.video_service.unload_model()
-        except Exception as e:
-            logger.warning(f"Failed to unload video model: {e}")
-
-    def _unload_sd_model(self):
-        """Free VRAM held by image models before video generation"""
-        try:
-            if self.generation_service.sd_service is not None:
-                logger.info("Unloading image model before video generation")
-                self.generation_service.unload_model()
-        except Exception as e:
-            logger.warning(f"Failed to unload image model: {e}")
 
     def _build_settings_tab(self):
         """Build the settings tab"""

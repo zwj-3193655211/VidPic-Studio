@@ -21,23 +21,7 @@ def _m(p: str) -> str:
 
 
 MODELS = {
-    # ---- SD1.5（diffusers 目录，已迁移到 models/sd15/）----
-    "sd15": {
-        "name": "SD1.5",
-        "type": "diffusers",
-        "path": _m("sd15"),
-        "base_dir": None,
-        "size_choices": [("512x512", 512, 512), ("576x768", 576, 768), ("768x768", 768, 768)],
-        "size_default": "512x512",
-        "steps_default": 30,
-        "steps_range": (5, 100, 5),
-        "guidance_default": 7.5,
-        "guidance_range": (1.0, 20.0, 0.5),
-        "num_images_default": 4,
-        "negative_prompt_default": "",
-    },
-
-    # ---- SDXL Base（官方原版，diffusers 目录，已迁移到 models/sdxl_base/）----
+    # ---- SDXL Base（官方原版，diffusers 目录）----
     "sdxl_base": {
         "name": "SDXL Base",
         "type": "diffusers",
@@ -86,7 +70,7 @@ MODELS = {
     },
 }
 
-DEFAULT_MODEL = "sd15"
+DEFAULT_MODEL = "realvisxl"
 
 
 def available_models() -> dict:

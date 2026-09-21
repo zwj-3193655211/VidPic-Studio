@@ -58,3 +58,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# pip/下载临时目录
+__pip_tmp__/

@@ -13,8 +13,8 @@ class TestModelSwitching:
     def test_init_uses_registry_path_by_default(self):
         """Default model uses the registry path (now in project models/ directory)"""
         svc = GenerationService()
-        assert svc.model_key == "sd15"
-        assert "models" in svc.sd_service.model_name and "sd15" in svc.sd_service.model_name
+        assert svc.model_key == "realvisxl"
+        assert "models" in svc.sd_service.model_name and "realvisxl" in svc.sd_service.model_name
 
     def test_init_model_path_override_applies_to_initial_model(self):
         """--model-path style override applies only to the initial model"""

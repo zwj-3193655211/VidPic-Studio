@@ -18,7 +18,7 @@ from services.generation_service import GenerationService
 def mock_generation_service():
     """Mock generation service"""
     service = MagicMock(spec=GenerationService)
-    service.model_key = "sd15"
+    service.model_key = "realvisxl"
     return service
 
 
@@ -80,7 +80,7 @@ class TestGenerateImages:
     def test_generate_images_empty_prompt(self, generation_tab):
         """Test that empty prompt returns error"""
         gallery, status = generation_tab.generate_images(
-            model_key="sd15",
+            model_key="realvisxl",
             prompt="",
             negative_prompt="",
             num_images=4,
